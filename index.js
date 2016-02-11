@@ -1,8 +1,8 @@
 'use strict';
 
-(function () {
+(function() {
   var tileset = new Image();
-  tileset.addEventListener('load', function () {
+  tileset.addEventListener('load', function() {
     initialize();
   });
 
@@ -10,12 +10,12 @@
 
   var options = {
     viewport: {
-      width: 50,
-      height: 50,
+      width: 40,
+      height: 40,
     },
     map: {
-      width: 100,
-      height: 100,
+      width: 90,
+      height: 90,
     },
   };
 
@@ -29,11 +29,14 @@
     tileWidth: 16,
     tileHeight: 16,
     tileSet: tileset,
+    tileColorize: true,
     tileMap: {
       player: [256, 18],
+      enemy: [240, 18],
       wall: [1, 1],
       tree: [52, 18],
       floor: [35, 18],
+      light: [137, 1],
     },
   });
 
@@ -48,6 +51,36 @@
     char: 'player',
     x: 0,
     y: 0,
+    lastMove: '',
+    inventory: [],
+    faction: 'human',
+    friendlies: ['human'],
+    hostiles: ['evil'],
+    onItem: function() {
+      this.inventory.push(item);
+    },
+  };
+
+  var wizard = {
+    char: 'wizard',
+    x: 0,
+    y: 0,
+    lastMove: '',
+    inventory: [],
+    faction: 'human',
+    friendlies: ['human'],
+    hostiles: ['evil'],
+  };
+
+  var enemy = {
+    char: 'enemy',
+    x: 0,
+    y: 0,
+    lastMove: '',
+    inventory: [],
+    faction: 'evil',
+    friendlies: [],
+    hostiles: ['human'],
   };
 
   var initState = {};
@@ -103,18 +136,26 @@
     player.x = playerPosition[0];
     player.y = playerPosition[1];
 
+    var enemyPosition = findRandomFloorSpace(map);
+    enemy.x = enemyPosition[0];
+    enemy.y = enemyPosition[1];
+
     initState = {
       rng: ROT.RNG.getState(),
       player: {
         x: player.x,
         y: player.y,
       },
+      enemy: {
+        x: enemy.x,
+        y: enemy.y,
+      },
       map: map,
     };
 
     draw();
 
-    document.addEventListener('keydown', function (event) {
+    document.addEventListener('keydown', function(event) {
       var temp;
       switch (event.keyCode) {
         case ROT.VK_UP:
@@ -148,17 +189,15 @@
           break;
       }
 
-      if (temp && isValidPosition(temp.x, temp.y)) {
-        player.x = temp.x;
-        player.y = temp.y;
-        draw();
+      if (temp && isWalkable(temp.x, temp.y)) {
+        playerMove(temp);
       }
 
     });
   }
 
   function mapGenCallback(m) {
-    return function (x, y, isWall) {
+    return function(x, y, isWall) {
       if (!m[y]) {
         m[y] = [];
       }
@@ -167,13 +206,15 @@
     };
   }
 
-  var lightPassCallback = function (x, y) {
-    return map[y][x] === 'floor';
+  function lightPassCallback(x, y) {
+    if (map[y]) {
+      return !map[y][x];
+    } else {
+      return false;
+    }
   };
 
-  var fov = new ROT.FOV.PreciseShadowcasting(
-    lightPassCallback
-  );
+  var fov = new ROT.FOV.RecursiveShadowcasting(lightPassCallback);
 
   function findRandomFloorSpace(map) {
     var x;
@@ -185,28 +226,75 @@
     return [x, y];
   }
 
+  function playerMove(position) {
+    player.x = position.x;
+    player.y = position.y;
+    draw();
+
+    var target = {
+      x: player.x,
+      y: player.y,
+    };
+
+    var dijkstra = new ROT.Path.Dijkstra(
+      target.x,
+      target.y,
+      isWalkable,
+      { topology: 4 }
+    );
+
+    var pathToTarget = [];
+
+    dijkstra.compute(
+      enemy.x,
+      enemy.y,
+      function(x, y) {
+        // this fn called once for
+        // each step of the path
+        pathToTarget.push([x, y]);
+        // pathToTarget[0] will be the
+        // enemy's start position!
+      }
+    );
+
+    if (!(enemy.x === player.x && enemy.y === player.y)) {
+      enemy.x = pathToTarget[1][0];
+      enemy.y = pathToTarget[1][1];
+    } else {
+      console.log('Gotcha!');
+    }
+  }
+
   function draw() {
     var viewportTopLeft = getViewportTopLeft();
 
     display.clear();
     drawMap(map, viewportTopLeft);
     drawPlayer(player, viewportTopLeft);
+    drawPlayer(enemy, viewportTopLeft);
+  }
 
+  function drawPlayer(player, viewportTopLeft) {
     fov.compute(
       player.x,
       player.y,
       10,
-      function (x, y, r, visibility) {
-        console.log(x, y, r, visibility);
+      function(x, y, r, visibility) {
+        // var ch = (r ? "" : "@");
+        // var color = (data[x+","+y] ? "#aa0": "#660");
+
+        if (visibility && map[y] && !(x === player.x && y === player.y) && !map[y][x]) {
+          // var char = map[y][x] ? map[y][x] : 'floor';
+          var char = 'floor';
+          display.draw(x - viewportTopLeft.x, y - viewportTopLeft.y, char, 'transparent');
+        }
         // x, y - coordinates of this space
         // r - distance from starting point
         // visibility - light amount, 0...1
       }
     );
-  }
 
-  function drawPlayer(player, viewportTopLeft) {
-    display.draw(player.x - viewportTopLeft.x, player.y - viewportTopLeft.y, ['floor', player.char]);
+    display.draw(player.x - viewportTopLeft.x, player.y - viewportTopLeft.y, ['floor', player.char], 'transparent');
   }
 
   function drawMap(map, viewportTopLeft) {
@@ -218,8 +306,7 @@
         var mapY = y + viewportTopLeft.y;
 
         var char = map[mapY][mapX] ? map[mapY][mapX] : 'floor';
-
-        display.draw(x, y, char);
+        display.draw(x, y, char, 'transparent');
       }
     }
   }
@@ -239,7 +326,7 @@
     }
 
     if (viewportTopLeft.x + options.viewport.width > options.map.width) {
-      viewportTopLeft.x = options.map.width - options.map.width;
+      viewportTopLeft.x = options.map.width - options.viewport.width;
     }
 
     if (viewportTopLeft.y + options.viewport.height > options.map.height) {
@@ -257,7 +344,7 @@
     draw();
   }
 
-  function isValidPosition(x, y) {
+  function isWalkable(x, y) {
     if (x < 0) {
       return false;
     }
