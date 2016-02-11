@@ -59,6 +59,7 @@
   var map = [];
   var roomsGrid = [];
 
+  // todo: make this an array
   var prettyGrid = [];
   var prettyGrid2 = [];
   var cellGrid = [];
@@ -83,12 +84,18 @@
     // combine maps
     for (var y = 0; y < roomsGrid.length; y++) {
       for (var x = 0; x < roomsGrid.length; x++) {
-
-        if (!m[y]) {
-          m[y] = [];
+        if (!map[y]) {
+          map[y] = [];
         }
 
-        if (roomsGrid[y][x])
+        prettyGrid[y][x] = prettyGrid[y][x] ? 0 : 1;
+        prettyGrid2[y][x] = prettyGrid2[y][x] ? 0 : 1;
+
+        map[y][x] = !(roomsGrid[y][x] && cellGrid[y][x]) ? 0 : 'tree';
+
+        if (map[y][x] && (prettyGrid[y][x] || prettyGrid2[y][x]) && ROT.RNG.getPercentage() > 33) {
+          map[y][x] = 'wall';
+        }
       }
     }
 
