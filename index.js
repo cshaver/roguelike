@@ -8,14 +8,16 @@
 
   tileset.src = 'dqtiles.png';
 
+  var messages = document.createElement('div');
+
   var options = {
     viewport: {
       width: 40,
       height: 40,
     },
     map: {
-      width: 90,
-      height: 90,
+      width: 40,
+      height: 40,
     },
   };
 
@@ -36,7 +38,9 @@
       wall: [1, 1],
       tree: [52, 18],
       floor: [35, 18],
+      dead: [101, 18],
       light: [137, 1],
+      dark: [188, 1],
     },
   });
 
@@ -51,13 +55,29 @@
     char: 'player',
     x: 0,
     y: 0,
+    power: 10,
+    health: 100,
+    maxHealth: 100,
     lastMove: '',
     inventory: [],
     faction: 'human',
     friendlies: ['human'],
     hostiles: ['evil'],
-    onItem: function() {
+    onItem: function(item) {
       this.inventory.push(item);
+    },
+    onHostile: function(enemy) {
+      enemy.damage(this.power);
+    },
+    damage: function(points) {
+      this.health = Math.max(0, this.health - points);
+      console.log(this.health);
+      if (this.health === 0) {
+        this.die();
+      }
+    },
+    die: function() {
+      this.char = 'dead';
     },
   };
 
@@ -65,23 +85,59 @@
     char: 'wizard',
     x: 0,
     y: 0,
+    power: 100,
+    health: 1000,
+    maxHealth: 1000,
     lastMove: '',
     inventory: [],
     faction: 'human',
     friendlies: ['human'],
     hostiles: ['evil'],
+    onHostile: function(enemy) {
+      enemy.damage(this.power);
+    },
+    damage: function(points) {
+      Math.max(0, this.health - points);
+      if (this.points === 0) {
+        this.die();
+      }
+    },
+    die: function() {
+      this.char = 'dead';
+    },
   };
 
   var enemy = {
     char: 'enemy',
     x: 0,
     y: 0,
+    power: 10,
+    health: 100,
+    maxHealth: 100,
     lastMove: '',
     inventory: [],
     faction: 'evil',
     friendlies: [],
     hostiles: ['human'],
+    onHostile: function(enemy) {
+      enemy.damage(this.power);
+    },
+    damage: function(points) {
+      this.health = Math.max(0, this.health - points);
+      console.log(this.health);
+      if (this.health === 0) {
+        this.die();
+      }
+    },
+    die: function() {
+      this.char = 'dead';
+    },
   };
+
+  var existingCharacters = [
+    player,
+    enemy,
+  ];
 
   var initState = {};
 
@@ -104,6 +160,8 @@
       display.getContainer()
     );
 
+    document.body.appendChild(messages);
+
     roomsMap.create(mapGenCallback(prettyGrid));
     roomsMap.create(mapGenCallback(prettyGrid2));
     roomsMap.create(mapGenCallback(roomsGrid));
@@ -124,7 +182,9 @@
         prettyGrid[y][x] = prettyGrid[y][x] ? 0 : 1;
         prettyGrid2[y][x] = prettyGrid2[y][x] ? 0 : 1;
 
-        map[y][x] = !(roomsGrid[y][x] && cellGrid[y][x]) ? 0 : 'tree';
+        // // sorta open map
+        // map[y][x] = !(roomsGrid[y][x] && cellGrid[y][x]) ? 0 : 'tree';
+        map[y][x] = roomsGrid[y][x] ? 'tree' : 0;
 
         if (map[y][x] && (prettyGrid[y][x] || prettyGrid2[y][x]) && ROT.RNG.getPercentage() > 33) {
           map[y][x] = 'wall';
@@ -190,7 +250,8 @@
       }
 
       if (temp && isWalkable(temp.x, temp.y)) {
-        playerMove(temp);
+        movePlayer(player, temp);
+        enemyMove();
       }
 
     });
@@ -226,11 +287,31 @@
     return [x, y];
   }
 
-  function playerMove(position) {
-    player.x = position.x;
-    player.y = position.y;
-    draw();
+  function movePlayer(player, position) {
+    var shouldMove = true;
+    for (var i = 0; i < existingCharacters.length; i++) {
+      var otherPlayer = existingCharacters[i];
 
+      if (player !== otherPlayer && isSameCoords(position.x, position.y, otherPlayer.x, otherPlayer.y)) {
+        shouldMove = false;
+        if (player.hostiles.includes(otherPlayer.faction)) {
+          player.onHostile(otherPlayer);
+          console.log('Hostile move by %s against %s!', player.char, otherPlayer.char);
+        }
+      }
+    }
+
+    if (shouldMove) {
+      player.x = position.x;
+      player.y = position.y;
+    }
+
+    // check for overlap and interraction
+
+    draw();
+  }
+
+  function enemyMove() {
     var target = {
       x: player.x,
       y: player.y,
@@ -249,19 +330,18 @@
       enemy.x,
       enemy.y,
       function(x, y) {
-        // this fn called once for
-        // each step of the path
         pathToTarget.push([x, y]);
-        // pathToTarget[0] will be the
-        // enemy's start position!
       }
     );
 
-    if (!(enemy.x === player.x && enemy.y === player.y)) {
-      enemy.x = pathToTarget[1][0];
-      enemy.y = pathToTarget[1][1];
-    } else {
-      console.log('Gotcha!');
+    // pathToTarget[0] is current position
+    pathToTarget.shift();
+
+    if (pathToTarget.length) {
+      movePlayer(enemy, {
+        x: pathToTarget[0][0],
+        y: pathToTarget[0][1],
+      });
     }
   }
 
@@ -270,35 +350,34 @@
 
     display.clear();
     drawMap(map, viewportTopLeft);
+    drawFov(player, viewportTopLeft);
     drawPlayer(player, viewportTopLeft);
     drawPlayer(enemy, viewportTopLeft);
   }
 
   function drawPlayer(player, viewportTopLeft) {
+    display.draw(player.x - viewportTopLeft.x, player.y - viewportTopLeft.y, ['floor', player.char], 'transparent');
+  }
+
+  function drawFov(player, viewportTopLeft) {
     fov.compute(
       player.x,
       player.y,
       10,
       function(x, y, r, visibility) {
-        // var ch = (r ? "" : "@");
-        // var color = (data[x+","+y] ? "#aa0": "#660");
-
-        if (visibility && map[y] && !(x === player.x && y === player.y) && !map[y][x]) {
-          // var char = map[y][x] ? map[y][x] : 'floor';
-          var char = 'floor';
-          display.draw(x - viewportTopLeft.x, y - viewportTopLeft.y, char, 'transparent');
+        if (visibility && map[y] && !isSameCoords(player.x, player.y, x, y)) {
+          var char = map[y][x] ? map[y][x] : 'floor';
+          var charArray = [char];
+          for (var i = 0; i < Math.round(r / 4); i++) {
+            charArray.push('dark');
+          }
+          display.draw(x - viewportTopLeft.x, y - viewportTopLeft.y, charArray, 'transparent');
         }
-        // x, y - coordinates of this space
-        // r - distance from starting point
-        // visibility - light amount, 0...1
       }
     );
-
-    display.draw(player.x - viewportTopLeft.x, player.y - viewportTopLeft.y, ['floor', player.char], 'transparent');
   }
 
   function drawMap(map, viewportTopLeft) {
-
     // y first!
     for (var y = 0; y < options.viewport.height; y++) {
       for (var x = 0; x < options.viewport.width; x++) {
@@ -306,7 +385,11 @@
         var mapY = y + viewportTopLeft.y;
 
         var char = map[mapY][mapX] ? map[mapY][mapX] : 'floor';
-        display.draw(x, y, char, 'transparent');
+        var charArray = [char];
+        for (var i = 0; i < 4; i++) {
+          charArray.push('dark');
+        }
+        display.draw(x, y, charArray, 'transparent');
       }
     }
   }
@@ -342,6 +425,14 @@
     player.y = initState.player.y;
     map = initState.map;
     draw();
+  }
+
+  function isSameCoords(x1, y1, x2, y2) {
+    return (x1 === x2 && y1 === y2);
+  }
+
+  function areEntitiesOverlapping(e1, e2) {
+    return isSameCoords(e1.x, e1.y, e2.x, e2.y);
   }
 
   function isWalkable(x, y) {
